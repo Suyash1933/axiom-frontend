@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+body {
+  background-color: black;
+}
+/* ---------- Global scrollbar (WebKit/Blink) ---------- */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #000 !important;
+  /* black track */
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #494949 !important;
+  /* dark thumb */
+  border-radius: 999px;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #393838 !important;
+}
+
+/* ---------- Firefox scrollbar rules (for elements) ---------- */
+/* Use on the element itself: scrollbar-width and scrollbar-color */
+.scrollbar-dark {
+  scrollbar-width: thin;
+  /* auto / thin / none */
+  scrollbar-color: #373737 #373737;
+  /* thumb, track */
+}
+
+/* ---------- Optional: a visible track outline (for overlay scrollbars) ---------- */
+.scrollbar-dark::-webkit-scrollbar-track {
+  box-shadow: inset 0 0 0 1px rgba(112, 111, 111, 0.02);
+}
