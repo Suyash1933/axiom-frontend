@@ -1,9 +1,8 @@
 // components/PairsList.tsx
 "use client";
 
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useLayoutEffect } from "react";
 import {
-  Sparkles,
   Zap,
   SlidersHorizontal,
   ChevronRight,
@@ -18,50 +17,17 @@ type PairItem = {
   title: string;
   subtitle?: string;
   age: string;
-  // numeric value used for live updates
-  value: number;
-  // display price (kept for compatibility)
+  value: number; // numeric driving sorting
   price?: string;
   stats: { label: string; value?: string; color?: string }[];
-  tags?: string[]; // e.g. ["P1"]
+  tags?: string[];
   image?: string;
 };
 
 const SAMPLE: PairItem[] = [
-  {
-    id: "1",
-    title: "Pumpmas",
-    subtitle: "Pumpmas",
-    age: "0s",
-    value: 13600, // represents 13.6K
-    price: "$4K",
-    tags: ["P1"],
-    stats: [{ label: "Risk", value: "13%", color: "red" }],
-    image: "/images/pill.png",
-  },
-  {
-    id: "2",
-    title: "ARNIE",
-    subtitle: "Justice for Arnie",
-    age: "0s",
-    value: 4890, // 4.89K
-    price: "$547",
-    tags: ["P2"],
-    stats: [{ label: "Risk", value: "13%", color: "green" }],
-    image: "/images/letter-a.png",
-  },
-  {
-    id: "3",
-    title: "AMM",
-    subtitle: "Ai Money Machine",
-    age: "17s",
-    value: 4340, // 4.34K
-    price: "$276",
-    tags: ["P3"],
-    stats: [{ label: "Risk", value: "0%", color: "green" }],
-    image: "/images/example.png",
-  },
-  // more items to allow scrolling
+  { id: "1", title: "Pumpmas", subtitle: "Pumpmas", age: "0s", value: 13600, price: "$4K", tags: ["P1"], stats: [{ label: "Risk", value: "13%", color: "red" }], image: "/images/pill.png" },
+  { id: "2", title: "ARNIE", subtitle: "Justice for Arnie", age: "0s", value: 4890, price: "$547", tags: ["P2"], stats: [{ label: "Risk", value: "13%", color: "green" }], image: "/images/letter-a.png" },
+  { id: "3", title: "AMM", subtitle: "Ai Money Machine", age: "17s", value: 4340, price: "$276", tags: ["P3"], stats: [{ label: "Risk", value: "0%", color: "green" }], image: "/images/example.png" },
   ...Array.from({ length: 8 }).map((_, i) => ({
     id: `extra-${i}`,
     title: `Extra ${i + 1}`,
@@ -75,111 +41,130 @@ const SAMPLE: PairItem[] = [
   })),
 ];
 
-type FloatBadge = {
-  id: string;
-  amount: number; // raw numeric delta (can be shown as absolute or percent)
-  direction: "up" | "down";
-  key: number; // unique key to force re-render
-};
-
 export default function PairsList({ title = "New Pairs" }: { title?: string }) {
-  // liveItems: items with numeric values we will mutate
-  const [liveItems, setLiveItems] = useState<PairItem[]>(SAMPLE);
+  const [items, setItems] = useState<PairItem[]>(SAMPLE);
   const [activePills, setActivePills] = useState<string[]>(["P1"]);
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // floating badges state (map of id -> FloatBadge). Using array for ordering.
+  type FloatBadge = { id: string; amount: number; direction: "up" | "down"; key: number };
   const [floating, setFloating] = useState<FloatBadge[]>([]);
 
-  // keep ref to interval so we can clear it on unmount
-  const intervalRef = useRef<number | null>(null);
+  // refs for FLIP
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
+  const prevRects = useRef<Record<string, DOMRect>>({});
 
   // toggle pill
   const togglePill = (p: string) =>
     setActivePills((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
 
-  // visible items based on pills (no change from before)
+  // visible list sorted by value desc (this determines DOM order)
   const visible = useMemo(() => {
-    if (activePills.length === 0) return liveItems;
-    return liveItems.filter((it) => it.tags?.some((t) => activePills.includes(t)));
-  }, [activePills, liveItems]);
+    const filtered = activePills.length === 0 ? items : items.filter((it) => it.tags?.some((t) => activePills.includes(t)));
+    return filtered.slice().sort((a, b) => b.value - a.value);
+  }, [items, activePills]);
 
-  // format numeric value to a string like "$13.6K" (keeps previous visual style)
   function fmtValue(v: number) {
-    if (Math.abs(v) >= 1000000) return `$${(v / 1_000_000).toFixed(2)}M`;
+    if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
     if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(2)}K`;
     return `$${v.toFixed(2)}`;
   }
 
-  // start a timer to randomly update values every X ms
+  // Capture current DOM positions of visible rows BEFORE the update
+  function capturePositions() {
+    const map: Record<string, DOMRect> = {};
+    visible.forEach((it) => {
+      const el = rowRefs.current[it.id];
+      if (el) map[it.id] = el.getBoundingClientRect();
+    });
+    prevRects.current = map;
+  }
+
+  // Animate from previous rects to current rects (FLIP)
+  function animateFromPrevious() {
+    const prev = prevRects.current;
+    visible.forEach((it) => {
+      const el = rowRefs.current[it.id];
+      if (!el) return;
+      const prevRect = prev[it.id];
+      const newRect = el.getBoundingClientRect();
+      if (!prevRect) return;
+      const dx = prevRect.left - newRect.left;
+      const dy = prevRect.top - newRect.top;
+      if (dx === 0 && dy === 0) return;
+
+      // apply inverse transform
+      el.style.transition = "none";
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      // force reflow
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      el.getBoundingClientRect();
+      // animate to natural position
+      el.style.transition = "transform 420ms cubic-bezier(0.2,0.8,0.2,1)";
+      el.style.transform = "";
+      const cleanup = () => {
+        if (!el) return;
+        el.style.transition = "";
+        el.style.transform = "";
+        el.removeEventListener("transitionend", cleanup);
+      };
+      el.addEventListener("transitionend", cleanup);
+    });
+  }
+
+  // Run FLIP after layout when items or activePills change
+  useLayoutEffect(() => {
+    // small timeout to ensure DOM has updated and refs assigned
+    // but useLayoutEffect runs before paint so this is safe and immediate
+    animateFromPrevious();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible.map((v) => v.id).join("|")]);
+
+  // Live updater: change numeric values and set floating badges.
   useEffect(() => {
-    // if you prefer a faster or slower update, change this number
     const intervalMs = 1500;
+    const id = window.setInterval(() => {
+      // 1) capture positions BEFORE updating items
+      capturePositions();
 
-    intervalRef.current = window.setInterval(() => {
-      setLiveItems((prev) => {
-        // create new array to trigger re-render
-        const next = prev.map((item) => ({ ...item }));
-
-        // We'll update only ones that are currently visible according to current pills
-        const visibleIds = new Set(
-          (activePills.length === 0 ? next : next.filter((it) => it.tags?.some((t) => activePills.includes(t)))).map(
-            (it) => it.id
-          )
-        );
-
-        // For each visible item, randomly change its value by -2% .. +2%
-        visibleIds.forEach((id) => {
-          const idx = next.findIndex((n) => n.id === id);
+      // 2) update values for items that match current filter (or all if none)
+      setItems((prev) => {
+        const next = prev.map((p) => ({ ...p }));
+        const candidates = next.filter((n) => activePills.length === 0 || n.tags?.some((t) => activePills.includes(t)));
+        // random small percent change; you can adjust range or bias here
+        candidates.forEach((item) => {
+          const idx = next.findIndex((x) => x.id === item.id);
           if (idx === -1) return;
-
           const oldVal = next[idx].value;
-          // change percent between -2% and +2%
-          const pct = (Math.random() * 4 - 2) / 100;
+          const pct = (Math.random() * 9 - 3) / 100; // -3% .. +6%
           const newVal = Math.max(0, oldVal * (1 + pct));
-
           next[idx].value = Number(newVal.toFixed(2));
 
           const delta = newVal - oldVal;
           const direction: FloatBadge["direction"] = delta >= 0 ? "up" : "down";
-
-          // add a floating badge for this id (with unique key)
           const badge: FloatBadge = {
-            id,
+            id: item.id,
             amount: Math.abs(Number(delta.toFixed(2))),
             direction,
             key: Date.now() + Math.floor(Math.random() * 1000),
           };
-
-          // push into floating state (we'll manage clearing badges below)
           setFloating((f) => {
-            // remove any existing badge for same id quickly to avoid duplicates
-            const others = f.filter((b) => b.id !== id);
+            const others = f.filter((b) => b.id !== item.id);
             return [...others, badge];
           });
-
-          // schedule badge removal after 900ms
-          window.setTimeout(() => {
-            setFloating((f) => f.filter((b) => b.key !== badge.key));
-          }, 900);
+          window.setTimeout(() => setFloating((f) => f.filter((b) => b.key !== badge.key)), 900);
         });
-
         return next;
       });
+
+      // 3) After state update, useLayoutEffect will run and trigger animateFromPrevious.
+      // No extra code here; useLayoutEffect depends on visible order change.
     }, intervalMs);
 
-    return () => {
-      if (intervalRef.current) window.clearInterval(intervalRef.current);
-    };
-    // include activePills in deps so updates are relevant to current filter selection
+    return () => window.clearInterval(id);
   }, [activePills]);
 
-  // helper to pick the floating badge for a row (returns null or badge)
   function badgeFor(id: string) {
-    // pick the most recent badge for that id
-    for (let i = floating.length - 1; i >= 0; i--) {
-      if (floating[i].id === id) return floating[i];
-    }
+    for (let i = floating.length - 1; i >= 0; i--) if (floating[i].id === id) return floating[i];
     return null;
   }
 
@@ -232,6 +217,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
             return (
               <article
                 key={it.id}
+                ref={(el) => (rowRefs.current[it.id] = el)}
                 className="relative flex items-start gap-3 bg-[#0b0b0d] border border-gray-800 rounded-lg p-3 hover:bg-[#0f1012] transition"
                 role="listitem"
               >
@@ -302,7 +288,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
                   <ChevronRight size={18} />
                 </button>
 
-                {/* floating badge: absolutely positioned near right side and animated */}
+                {/* floating badge */}
                 {badge && (
                   <span
                     key={badge.key}
@@ -310,7 +296,6 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
                       position: "absolute",
                       right: 52,
                       top: 10,
-                      // animation: translate up or down and fade out
                       transform: `translateY(${badge.direction === "up" ? "-8px" : "8px"})`,
                       opacity: 1,
                       transition: "transform 700ms ease, opacity 700ms ease",
@@ -321,13 +306,12 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
                       badge.direction === "up" ? "bg-green-900/80 text-green-300 border border-green-700" : "bg-red-900/80 text-red-300 border border-red-700"
                     }`}
                   >
-                    {badge.direction === "up" ? "▲" : "▼"} {Math.abs(badge.amount) >= 1 ? fmtValue(badge.amount) : `${(badge.amount).toFixed(2)}`}
+                    {badge.direction === "up" ? "▲" : "▼"} {Math.abs(badge.amount) >= 1 ? fmtValue(badge.amount) : `${badge.amount.toFixed(2)}`}
                   </span>
                 )}
               </article>
             );
           })}
-
           {visible.length === 0 && <div className="py-6 text-center text-gray-400">No pairs match the selected pill(s).</div>}
         </div>
       </div>
