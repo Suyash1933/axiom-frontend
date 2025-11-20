@@ -17,7 +17,7 @@ type PairItem = {
   title: string;
   subtitle?: string;
   age: string;
-  value: number; // numeric driving sorting
+  value: number;
   price?: string;
   stats: { label: string; value?: string; color?: string }[];
   tags?: string[];
@@ -49,6 +49,9 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
   type FloatBadge = { id: string; amount: number; direction: "up" | "down"; key: number };
   const [floating, setFloating] = useState<FloatBadge[]>([]);
 
+  // track short-lived row animation state: id -> "up" | "down"
+  const [rowPulse, setRowPulse] = useState<Record<string, "up" | "down">>({});
+
   // refs for FLIP
   const rowRefs = useRef<Record<string, HTMLElement | null>>({});
   const prevRects = useRef<Record<string, DOMRect>>({});
@@ -57,7 +60,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
   const togglePill = (p: string) =>
     setActivePills((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
 
-  // visible list sorted by value desc (this determines DOM order)
+  // visible list sorted by value desc (determines DOM order)
   const visible = useMemo(() => {
     const filtered = activePills.length === 0 ? items : items.filter((it) => it.tags?.some((t) => activePills.includes(t)));
     return filtered.slice().sort((a, b) => b.value - a.value);
@@ -69,7 +72,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
     return `$${v.toFixed(2)}`;
   }
 
-  // Capture current DOM positions of visible rows BEFORE the update
+  // Capture positions of visible rows BEFORE update
   function capturePositions() {
     const map: Record<string, DOMRect> = {};
     visible.forEach((it) => {
@@ -79,7 +82,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
     prevRects.current = map;
   }
 
-  // Animate from previous rects to current rects (FLIP)
+  // Animate from prev rects to current rects (FLIP)
   function animateFromPrevious() {
     const prev = prevRects.current;
     visible.forEach((it) => {
@@ -92,14 +95,12 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
       const dy = prevRect.top - newRect.top;
       if (dx === 0 && dy === 0) return;
 
-      // apply inverse transform
       el.style.transition = "none";
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       // force reflow
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       el.getBoundingClientRect();
-      // animate to natural position
-      el.style.transition = "transform 420ms cubic-bezier(0.2,0.8,0.2,1)";
+      el.style.transition = "transform 360ms cubic-bezier(0.2,0.8,0.2,1)";
       el.style.transform = "";
       const cleanup = () => {
         if (!el) return;
@@ -111,36 +112,36 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
     });
   }
 
-  // Run FLIP after layout when items or activePills change
+  // useLayoutEffect to run FLIP right after DOM update
   useLayoutEffect(() => {
-    // small timeout to ensure DOM has updated and refs assigned
-    // but useLayoutEffect runs before paint so this is safe and immediate
     animateFromPrevious();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible.map((v) => v.id).join("|")]);
 
-  // Live updater: change numeric values and set floating badges.
+  // Live updater: faster + larger swings to create lively up/down motion
   useEffect(() => {
-    const intervalMs = 1500;
+    const intervalMs = 700; // faster updates
     const id = window.setInterval(() => {
-      // 1) capture positions BEFORE updating items
+      // capture positions before change
       capturePositions();
 
-      // 2) update values for items that match current filter (or all if none)
       setItems((prev) => {
         const next = prev.map((p) => ({ ...p }));
         const candidates = next.filter((n) => activePills.length === 0 || n.tags?.some((t) => activePills.includes(t)));
-        // random small percent change; you can adjust range or bias here
+
         candidates.forEach((item) => {
           const idx = next.findIndex((x) => x.id === item.id);
           if (idx === -1) return;
           const oldVal = next[idx].value;
-          const pct = (Math.random() * 9 - 3) / 100; // -3% .. +6%
+          // bigger random change: -12% .. +12%
+          const pct = (Math.random() * 24 - 12) / 100;
           const newVal = Math.max(0, oldVal * (1 + pct));
           next[idx].value = Number(newVal.toFixed(2));
 
           const delta = newVal - oldVal;
           const direction: FloatBadge["direction"] = delta >= 0 ? "up" : "down";
+
+          // show floating delta badge
           const badge: FloatBadge = {
             id: item.id,
             amount: Math.abs(Number(delta.toFixed(2))),
@@ -151,13 +152,23 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
             const others = f.filter((b) => b.id !== item.id);
             return [...others, badge];
           });
-          window.setTimeout(() => setFloating((f) => f.filter((b) => b.key !== badge.key)), 900);
+          window.setTimeout(() => setFloating((f) => f.filter((b) => b.key !== badge.key)), 800);
+
+          // trigger short-lived row pulse animation
+          setRowPulse((r) => ({ ...r, [item.id]: direction }));
+          window.setTimeout(() => {
+            setRowPulse((r) => {
+              const copy = { ...r };
+              delete copy[item.id];
+              return copy;
+            });
+          }, 700);
         });
+
         return next;
       });
 
-      // 3) After state update, useLayoutEffect will run and trigger animateFromPrevious.
-      // No extra code here; useLayoutEffect depends on visible order change.
+      // after state update, useLayoutEffect animates FLIP
     }, intervalMs);
 
     return () => window.clearInterval(id);
@@ -168,8 +179,32 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
     return null;
   }
 
+  // Inline CSS for the small float animations (scoped here)
+  // You can move these into globals.css if preferred.
+  const floatStyles = `
+    @keyframes floatUp {
+      0% { transform: translateY(0); opacity: 1; }
+      30% { transform: translateY(-10px); opacity: 1; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes floatDown {
+      0% { transform: translateY(0); opacity: 1; }
+      30% { transform: translateY(10px); opacity: 1; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+    .float-up {
+      animation: floatUp 700ms ease;
+    }
+    .float-down {
+      animation: floatDown 700ms ease;
+    }
+  `;
+
   return (
     <section className="w-full px-6 md:px-10 py-4">
+      {/* style tag for small local animations */}
+      <style>{floatStyles}</style>
+
       <div className="w-1/3 min-w-[340px]">
         {/* header */}
         <div className="flex items-center justify-between mb-3">
@@ -214,11 +249,12 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
           {visible.map((it) => {
             const badge = badgeFor(it.id);
             const formatted = fmtValue(it.value);
+            const pulseClass = rowPulse[it.id] === "up" ? "float-up" : rowPulse[it.id] === "down" ? "float-down" : "";
             return (
               <article
                 key={it.id}
                 ref={(el) => (rowRefs.current[it.id] = el)}
-                className="relative flex items-start gap-3 bg-[#0b0b0d] border border-gray-800 rounded-lg p-3 hover:bg-[#0f1012] transition"
+                className={`relative flex items-start gap-3 bg-[#0b0b0d] border border-gray-800 rounded-lg p-3 hover:bg-[#0f1012] transition ${pulseClass}`}
                 role="listitem"
               >
                 <div className="w-14 h-14 rounded-md overflow-hidden border border-gray-700 flex-shrink-0">
@@ -288,7 +324,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
                   <ChevronRight size={18} />
                 </button>
 
-                {/* floating badge */}
+                {/* floating delta badge */}
                 {badge && (
                   <span
                     key={badge.key}
@@ -298,7 +334,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
                       top: 10,
                       transform: `translateY(${badge.direction === "up" ? "-8px" : "8px"})`,
                       opacity: 1,
-                      transition: "transform 700ms ease, opacity 700ms ease",
+                      transition: "transform 480ms ease, opacity 480ms ease",
                       pointerEvents: "none",
                       zIndex: 40,
                     }}
