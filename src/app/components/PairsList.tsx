@@ -253,7 +253,7 @@ export default function PairsList({ title = "New Pairs" }: { title?: string }) {
             return (
               <article
                 key={it.id}
-                ref={(el) => (rowRefs.current[it.id] = el)}
+                ref={(el) => { rowRefs.current[it.id] = el; }}
                 className={`relative flex items-start gap-3 bg-[#0b0b0d] border border-gray-800 rounded-lg p-3 hover:bg-[#0f1012] transition ${pulseClass}`}
                 role="listitem"
               >
