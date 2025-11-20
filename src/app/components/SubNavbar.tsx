@@ -117,7 +117,7 @@ export default function SubNavbar() {
             <div className="relative" ref={filterRef}>
               <button
                 onClick={() => setFilterOpen((o) => !o)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-[white] border border-gray-700 rounded-full text-sm"
+                className="flex items-center gap-2 px-3 py-1.5 bg-[grey] border border-gray-700 rounded-full text-sm"
               >
                 <SlidersHorizontal size={14} />
                 <span className="hidden md:inline">Filter</span>
