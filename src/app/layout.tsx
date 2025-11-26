@@ -24,10 +24,16 @@ export default function RootLayout({
       {/* add bottom padding so fixed footer doesn't overlap content */}
       <body className="bg-black pb-16 text-white">
         <Navbar />
-        <SubNavbar />
-        <TriplePairs />
-        {children}
-        <Footer />
+<SubNavbar />
+
+{/* main content area — no blank scrolling */}
+<div className="flex-1 overflow-hidden h-[calc(100vh-160px)]">
+  <TriplePairs />
+  {children}
+</div>
+
+<Footer />
+
       </body>
     </html>
   );
